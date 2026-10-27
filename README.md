@@ -85,7 +85,9 @@ Writes are serialized and atomic (temp file + rename), guarded by a lock
 directory so two harness processes cannot read-modify-write the same file at
 once, and retried when Windows refuses the rename because a scanner has the
 target open for a moment. A byte-order mark in the file (Notepad saves UTF-8
-with one) is tolerated. Limits: 300 items, 600 characters each, exact
+with one) is tolerated. **Clear all** copies the current document to
+`memory.json.bak` before emptying the list, so the one destructive action in
+the plugin can always be undone. Limits: 300 items, 600 characters each, exact
 duplicates refused (case-insensitive).
 
 ## It has to work every time, so here is what is guaranteed

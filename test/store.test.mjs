@@ -87,13 +87,17 @@ test('concurrent adds keep every item', async () => {
   }
 });
 
-test('clear empties the file and reports the count', async () => {
-  const { store, cleanup } = await fixture();
+test('clear empties the file, reports the count and keeps a copy', async () => {
+  const { store, file, cleanup } = await fixture();
   try {
     await store.add('One');
     await store.add('Two');
     assert.equal(await store.clear(), 2);
     assert.deepEqual(await store.list(), []);
+
+    // The pre-clear document is beside the store, so one click is undoable.
+    const backup = JSON.parse(await readFile(`${file}.bak`, 'utf8'));
+    assert.deepEqual(backup.items.map((item) => item.text).sort(), ['One', 'Two']);
   } finally {
     await cleanup();
   }
