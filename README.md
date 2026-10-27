@@ -55,6 +55,19 @@ The model also gets a `memory` tool:
 Ask it to "remember that…" and it will use `add`; "forget the pnpm rule" and it
 will `list` then `remove`. Every change also shows up in the panel immediately.
 
+A tool call is written by whichever model is driving the chat, so a fact saved
+that way is that model's sentence about you. When the wording matters, skip the
+model:
+
+| Command | Effect |
+| --- | --- |
+| `/remember <fact>` | stores what you typed, word for word (runs of spaces and extra blank lines are normalised) |
+| `/remember` | lists every item with its id |
+| `/forget <id>` | deletes one item |
+
+The text is `rawInput` from the composer — no model, no paraphrase, no extra
+tokens spent turning your sentence into a different sentence.
+
 ## Storage
 
 ```

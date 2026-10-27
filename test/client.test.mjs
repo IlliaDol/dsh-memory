@@ -69,3 +69,11 @@ test('the panel starts in a loading state with its heading', () => {
   assert.match(text, /Memory/u);
   assert.match(text, /Loading/u);
 });
+
+test('a fact wraps on any character instead of running out of its row', () => {
+  const { exported } = loadClient();
+  assert.equal(exported.FACT_TEXT.overflowWrap, 'anywhere');
+  assert.equal(exported.FACT_TEXT.wordBreak, 'break-word');
+  assert.equal(exported.FACT_TEXT.maxWidth, '100%');
+  assert.equal(exported.FACT_TEXT.whiteSpace, 'pre-wrap');
+});

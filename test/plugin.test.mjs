@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../lib/store.js';
-import { createMemoryTool, handleApi, apply, name, inject, API_PATH } from '../lib/index.js';
+import { createMemoryTool, handleApi, apply, name, inject, API_PATH, createMemoryCommands } from '../lib/index.js';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-memory-api-'));
@@ -38,8 +38,7 @@ test('the tool adds, lists, updates and removes', async () => {
   }
 });
 
-test('the HTTP handler reads, adds, removes and rejects bad input', async () => {
-  const { store, cleanup } = await fixture();
+test('the HTTP handler reads, adds, removes and rejects bad input', async () => {  const { store, cleanup } = await fixture();
   try {
     const get = await handleApi(store, new Request('http://x/api/dsh-memory/items'));
     const initial = await get.json();
@@ -165,10 +164,11 @@ test('an empty memory produces an empty section, a filled one produces bullets',
  * @returns {{ctx: any, log: any}} fake context and what it recorded
  */
 function host(options = {}) {
-  const log = { sections: [], tools: [], routes: [] };
+  const log = { sections: [], tools: [], routes: [], commands: [] };
   const services = {
     tools: { register: (tool) => { log.tools.push(tool); return () => undefined; } },
     connection: { fetch: { register: (route) => { log.routes.push(route); return () => undefined; } } },
+    commands: { register: (command) => { log.commands.push(command); return () => undefined; } },
   };
   const ctx = {
     systemPrompt: {
@@ -276,3 +276,51 @@ test('a host that cannot place or accept the section still gets the tool and the
   }
 });
 
+
+test('/remember stores the composer text verbatim and /forget deletes it', async () => {
+  const { store, cleanup } = await fixture();
+  try {
+    const [remember, forget] = createMemoryCommands(store);
+    const saved = await remember.handler({ rawInput: '  Prefers pnpm;\nnever run tests against production.  ' });
+    assert.equal(saved.kind, 'success');
+    assert.match(saved.text, /Remembered/u);
+
+    const [item] = await store.list();
+    // Byte-for-byte what the user typed, minus the edge whitespace.
+    assert.equal(item.text, 'Prefers pnpm;\nnever run tests against production.');
+    assert.equal(item.source, 'user');
+
+    const listed = await remember.handler({ rawInput: '   ' });
+    assert.match(listed.text, /mem_/u);
+
+    const duplicate = await remember.handler({ rawInput: item.text });
+    assert.match(duplicate.text, /Already remembered/u);
+
+    const gone = await forget.handler({ rawInput: item.id });
+    assert.match(gone.text, /Deleted/u);
+    assert.equal((await store.list()).length, 0);
+
+    const missing = await forget.handler({ rawInput: 'mem_deadbeef' });
+    assert.equal(missing.kind, 'error');
+    const noArg = await forget.handler({ rawInput: '' });
+    assert.equal(noArg.kind, 'error');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('apply registers the /remember and /forget commands', async () => {
+  const { file, cleanup } = await fixture();
+  try {
+    const { ctx, log } = host();
+    apply(ctx, { file });
+    assert.deepEqual(log.commands.map((command) => command.name).sort(), ['forget', 'remember']);
+    for (const command of log.commands) {
+      assert.match(command.definitionId, /^dsh-memory\//u);
+      assert.equal(typeof command.handler, 'function');
+      assert.equal(typeof command.description, 'string');
+    }
+  } finally {
+    await cleanup();
+  }
+});
