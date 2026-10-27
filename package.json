@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Per-item memory for DeepSeek Harness: a Memory panel in Settings where facts can be added and deleted one by one, a `memory` tool for the model, and a prompt section built from the list.",
   "type": "module",
   "main": "lib/index.js",

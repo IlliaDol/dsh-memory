@@ -111,6 +111,65 @@ test('a corrupt file reads as empty instead of throwing', async () => {
   }
 });
 
+test('a byte-order mark in the file does not hide every fact', async () => {
+  const { store, file, cleanup } = await fixture();
+  try {
+    const document = JSON.stringify({
+      v: 1,
+      items: [{ id: 'mem_abcdef01', text: 'Saved by Notepad.', createdAt: '2026-10-01T00:00:00.000Z' }],
+    });
+    await writeFile(file, `\uFEFF${document}`, 'utf8');
+
+    assert.equal((await store.list()).length, 1);
+    assert.equal(store.listSync().length, 1);
+    await store.add('And one more.');
+    assert.equal((await store.list()).length, 2);
+    // The store always rewrites its own document without the mark.
+    assert.notEqual((await readFile(file, 'utf8')).charCodeAt(0), 0xFEFF);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('the synchronous view tracks the file and its signature', async () => {
+  const { store, file, cleanup } = await fixture();
+  try {
+    assert.equal(store.signatureSync(), null);
+    assert.deepEqual(store.listSync(), []);
+
+    const { item } = await store.add('One fact.');
+    const signature = store.signatureSync();
+    assert.equal(typeof signature, 'string');
+    assert.deepEqual(store.listSync().map((entry) => entry.id), [item.id]);
+
+    await store.add('Another fact.');
+    assert.notEqual(store.signatureSync(), signature);
+    assert.equal(store.listSync().length, 2);
+
+    await rm(file, { force: true });
+    assert.equal(store.signatureSync(), null);
+    assert.deepEqual(store.listSync(), []);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('two processes writing at once keep both items', async () => {
+  const { file, cleanup } = await fixture();
+  try {
+    const desktop = new MemoryStore(file);
+    const web = new MemoryStore(file);
+    await Promise.all([
+      desktop.add('From the desktop app.'),
+      web.add('From the web profile.'),
+    ]);
+    const texts = (await desktop.list()).map((item) => item.text).sort();
+    assert.deepEqual(texts, ['From the desktop app.', 'From the web profile.']);
+  } finally {
+    await cleanup();
+  }
+});
+
 test('the prompt projection is capped and says what it dropped', async () => {
   const many = Array.from({ length: 40 }, (_value, index) => ({
     id: `mem_${String(index).padStart(8, '0')}`,

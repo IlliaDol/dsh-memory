@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MemoryStore } from '../lib/store.js';
@@ -158,3 +158,121 @@ test('an empty memory produces an empty section, a filled one produces bullets',
     await cleanup();
   }
 });
+
+/**
+ * The smallest host that behaves like cordis for this plugin.
+ * @param {object} options overrides
+ * @returns {{ctx: any, log: any}} fake context and what it recorded
+ */
+function host(options = {}) {
+  const log = { sections: [], tools: [], routes: [] };
+  const services = {
+    tools: { register: (tool) => { log.tools.push(tool); return () => undefined; } },
+    connection: { fetch: { register: (route) => { log.routes.push(route); return () => undefined; } } },
+  };
+  const ctx = {
+    systemPrompt: {
+      getSectionOrder: options.getSectionOrder ?? (() => 500),
+      section: options.section ?? ((section) => { log.sections.push(section); }),
+    },
+    effect: (work) => {
+      const dispose = work();
+      return typeof dispose === 'function' ? dispose : () => undefined;
+    },
+    inject(names, callback) {
+      const scope = {
+        ...services,
+        get: (key) => services[key],
+        effect: (work) => {
+          const dispose = work();
+          return typeof dispose === 'function' ? dispose : () => undefined;
+        },
+      };
+      if (names.some((entry) => services[entry] !== undefined)) callback(scope);
+    },
+  };
+  return { ctx, log };
+}
+
+/** Seed a store file without going through the store. */
+async function seed(file, text) {
+  await writeFile(file, JSON.stringify({
+    v: 1,
+    items: [{
+      id: 'mem_abcdef01',
+      text,
+      source: 'user',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    }],
+  }, null, 2), 'utf8');
+}
+
+test('the first assembly of a cold process already contains memory', async () => {
+  const { file, cleanup } = await fixture();
+  try {
+    await seed(file, 'Ships on Fridays.');
+    const { ctx, log } = host();
+    apply(ctx, { file });
+
+    // No tick, no await: this is the assembly the harness performs on turn one,
+    // and it used to run before the store had ever been read.
+    const text = log.sections[0].text();
+    assert.match(text, /Ships on Fridays/u);
+    assert.match(text, /^## Memory/u);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('a fact written by another profile appears on the next assembly', async () => {
+  const { file, cleanup } = await fixture();
+  try {
+    await seed(file, 'First fact.');
+    const { ctx, log } = host();
+    apply(ctx, { file });
+    assert.match(log.sections[0].text(), /First fact/u);
+
+    // A second MemoryStore is a second process: no shared listener, no cache.
+    const other = new MemoryStore(file);
+    await other.add('Added from the web profile.');
+
+    assert.match(log.sections[0].text(), /web profile/u);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('clearing the store empties the next assembly', async () => {
+  const { file, cleanup } = await fixture();
+  try {
+    await seed(file, 'Temporary fact.');
+    const { ctx, log } = host();
+    apply(ctx, { file });
+    assert.match(log.sections[0].text(), /Temporary fact/u);
+
+    await new MemoryStore(file).clear();
+    assert.equal(log.sections[0].text(), '');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('a host that cannot place or accept the section still gets the tool and the route', async () => {
+  const { file, cleanup } = await fixture();
+  try {
+    const { ctx, log } = host({
+      getSectionOrder: () => { throw new Error('unknown section anchor'); },
+      section: () => { throw new Error('duplicate section name'); },
+    });
+    apply(ctx, { file });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(log.sections.length, 0);
+    assert.equal(log.tools[0]?.name, 'memory');
+    assert.equal(log.routes[0]?.path, API_PATH);
+  } finally {
+    await cleanup();
+  }
+});
+

@@ -5,10 +5,12 @@ with Add, Delete, and Clear all. No editing a 25 KB `AGENTS.md` to change one
 line.
 
 ```sh
-dsh plugin --profile web add github:IlliaDol/dsh-memory
+dsh plugin --profile desktop add github:IlliaDol/dsh-memory   # the app
+dsh plugin --profile web add github:IlliaDol/dsh-memory       # dsh web
 ```
 
-Restart the profile, hard-refresh, open **Settings → Memory**.
+Restart the profile (the desktop app composes its bundle list at boot), then
+open **Settings → Memory**.
 
 ## Why this exists
 
@@ -66,8 +68,61 @@ $DSH_HOME/memory.json
 }
 ```
 
-Writes are serialized and atomic (temp file + rename). Limits: 300 items, 600
-characters each, exact duplicates refused (case-insensitive).
+Writes are serialized and atomic (temp file + rename), guarded by a lock
+directory so two harness processes cannot read-modify-write the same file at
+once, and retried when Windows refuses the rename because a scanner has the
+target open for a moment. A byte-order mark in the file (Notepad saves UTF-8
+with one) is tolerated. Limits: 300 items, 600 characters each, exact
+duplicates refused (case-insensitive).
+
+## It has to work every time, so here is what is guaranteed
+
+The section provider is synchronous — the prompt registry takes a string or a
+string-returning function, never a promise — so the plugin reads
+`memory.json` on demand rather than warming a cache at load. Three things
+follow, and each one has a regression test:
+
+- **The first turn of a fresh process has memory.** An awaited read at load
+  loses the race whenever the first assembly beats it; that race is the
+  "memory is there sometimes" failure. Reading on demand cannot lose it.
+- **A fact added anywhere shows up without a restart.** The file's
+  `mtime:size` is checked on every assembly, so a write from the other profile
+  (web beside desktop), or a hand edit, is visible on the next turn.
+- **A host that cannot place the section still gets the tool and the panel.**
+  A renamed section anchor or a duplicate section name is logged, not fatal.
+
+Each load logs one line, so the host log answers "did this session start with
+memory?":
+
+```
+[dsh-memory] host active; file=C:\Users\illya\.dsh\memory.json
+[dsh-memory] prompt section: 3 item(s)
+```
+
+`prompt section: 0 item(s)` with a non-empty file means the plugin is reading
+somewhere else; no line at all means the bundle never mounted.
+
+### If the plugin disappears after an app update
+
+Both halves live in the profile's load list, not in the app:
+
+```sh
+dsh plugin --profile desktop add github:IlliaDol/dsh-memory   # re-adds deps + bundle
+```
+
+That one command restores the dependency and the `dsh.profile.bundles` entry
+the desktop app composes from; restart the app afterwards. The panel saying
+"Memory API is not available on this host" is the same condition.
+
+### Checking it end to end
+
+```sh
+dsh --profile <profile> "what do you remember about me?"
+```
+
+The answer comes from the prompt section (`memory` tool: `list`). To prove the
+prompt path rather than the file on disk, watch for the `prompt section: N
+item(s)` line in the same run.
 
 ## Security
 
