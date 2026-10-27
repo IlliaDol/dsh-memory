@@ -1,0 +1,13 @@
+# runtime
+node_modules/
+*.log
+
+# local state
+.dsh/
+memory.json
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

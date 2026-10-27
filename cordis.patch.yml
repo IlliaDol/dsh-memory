@@ -1,0 +1,8 @@
+# dsh-memory bundle for DeepSeek Harness (dsh).
+#
+# One row mounts both halves: the node half adds the Memory prompt section, the
+# `memory` tool and the authenticated /api/dsh-memory/items route; the browser
+# half (declared by package.json#dsh.client) adds the Memory page to Settings.
+- insert:
+    - id: dsh-memory
+      name: dsh-memory
